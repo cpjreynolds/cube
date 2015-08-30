@@ -2,3 +2,14 @@
 name = "cube"
 version = "0.1.0"
 authors = ["Cole Reynolds <cpjreynolds@gmail.com>"]
+
+[dependencies]
+glium = "*"
+glutin = "*"
+gel = "*"
+time = "*"
+num = "*"
+image = "*"
+rand = "*"
+obj = "*"
+rustc-serialize = "*"
