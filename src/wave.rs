@@ -8,33 +8,33 @@ use num::{
 use gel::PI_2;
 
 #[derive(Debug, Clone)]
-pub struct Builder {
+pub struct WaveBuilder {
     inner: Wave,
 }
 
-impl Builder {
-    pub fn new() -> Builder {
-        Builder {
+impl WaveBuilder {
+    pub fn new() -> WaveBuilder {
+        WaveBuilder {
             inner: Wave::default(),
         }
     }
 
-    pub fn amplitude(&mut self, amp: f32) -> &mut Builder {
+    pub fn amplitude(&mut self, amp: f32) -> &mut WaveBuilder {
         self.inner.set_amplitude(amp);
         self
     }
 
-    pub fn period(&mut self, period: f32) -> &mut Builder {
+    pub fn period(&mut self, period: f32) -> &mut WaveBuilder {
         self.inner.set_period(period);
         self
     }
 
-    pub fn pshift(&mut self, pshift: f32) -> &mut Builder {
+    pub fn pshift(&mut self, pshift: f32) -> &mut WaveBuilder {
         self.inner.set_pshift(pshift);
         self
     }
 
-    pub fn vshift(&mut self, vshift: f32) -> &mut Builder {
+    pub fn vshift(&mut self, vshift: f32) -> &mut WaveBuilder {
         self.inner.set_vshift(vshift);
         self
     }

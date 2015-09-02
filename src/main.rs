@@ -1,4 +1,7 @@
 #![feature(box_syntax)]
+#![feature(box_patterns)]
+#![feature(const_fn)]
+#![feature(result_expect)]
 
 #[macro_use]
 extern crate glium;
@@ -8,24 +11,24 @@ extern crate gel;
 extern crate num;
 extern crate image;
 extern crate rand;
+extern crate toml;
+extern crate rustc_serialize;
+extern crate term;
 
-use rand::Rng;
 use std::fs::File;
 use std::io::prelude::*;
+use std::env;
 
+use num::One;
 use gel::{
     Mat4,
     Vec3,
     Translate,
     Scale,
     Rotate,
+    Repeat,
     Projection,
-    PI,
-    PI_2,
 };
-
-use glium::Program;
-
 use glium::{
     Display,
     DisplayBuild,
@@ -38,56 +41,143 @@ use glium::uniforms::{
     MinifySamplerFilter,
     MagnifySamplerFilter,
 };
-
-use num::One;
-
 use glutin::{
     WindowBuilder,
+    GlProfile,
     Event,
     VirtualKeyCode,
     ElementState,
 };
 
-mod shader;
+use cube::Cube;
+use wave::WaveBuilder;
+use resource::shader::{
+    Manager,
+};
+use metrics::{
+    Metrics,
+    MetricsDisplay,
+};
+use config::Config;
+use process::Process;
+use camera::Camera;
+use input::{
+    Input,
+    Key,
+};
+use delta::Delta;
+use errors::{
+    Result,
+    Error,
+};
+
 mod cube;
 mod wave;
-
-use cube::Cube;
-use wave::Wave;
-use shader::Manager;
+mod resource;
+mod camera;
+mod config;
+mod metrics;
+mod errors;
+mod process;
+mod delta;
+mod input;
+mod cursor;
 
 fn main() {
-    let display: Display = WindowBuilder::new()
-                                         .with_depth_buffer(24)
-                                         .build_glium()
-                                         .unwrap();
+    let process = Process::new(execute);
+    process.execute().handle();
+}
 
-    let container_img = image::open("container.jpg").unwrap();
-    let texture = SrgbTexture2d::new(&display, container_img).unwrap();
+fn execute() -> Result<()> {
+    let config_path = try!(env::var("CUBE_CONF"));
+    let config: Config = try!(Config::new(&config_path));
+    println!("{:#?}", config);
 
-    let mut cube = Cube::new(&display, 0.5).unwrap();
-    cube.draw_params().depth_test = DepthTest::IfLessOrEqual;
-    cube.draw_params().depth_write = true;
+    let window_builder = config.window().to_window_builder();
+    let display = try!(window_builder.build_glium());
 
-    let mut rng = rand::thread_rng();
+    let mut cubes: Vec<Cube> = Vec::new();
+    for cparams in config.cubes().iter() {
+        let tex_img_path = config.paths().assets().join(cparams.texture());
+        let img = try!(image::open(tex_img_path));
+        let texture = try!(SrgbTexture2d::new(&display, img));
 
-    let sinwave = Wave::default();
-    let coswave = wave::Builder::new();
-    let angle_wave = wave::Builder::new().amplitude(PI).period(5.0).build();
+        let mut cube: Cube = try!(Cube::new(&display, texture));
+        cube.set_translation(cparams.translation())
+            .set_axis(cparams.axis())
+            .set_scale(cparams.scale());
+        cube.wave_mut()
+            .set_amplitude(cparams.amplitude())
+            .set_period(cparams.period())
+            .set_pshift(cparams.pshift())
+            .set_vshift(cparams.vshift());
+
+        cubes.push(cube);
+    }
 
     let mut shaders = Manager::new();
 
-    let mut vert_src_file = File::open("cube.vert").unwrap();
+    let mut vert_src_file = try!(File::open(config.paths().shaders().join("cube.vert")));
     let mut vert_src = String::new();
-    vert_src_file.read_to_string(&mut vert_src).unwrap();
+    try!(vert_src_file.read_to_string(&mut vert_src));
     shaders.store("cube.vert", vert_src);
 
-    let mut frag_src_file = File::open("cube.frag").unwrap();
+    let mut frag_src_file = try!(File::open(config.paths().shaders().join("cube.frag")));
     let mut frag_src = String::new();
-    frag_src_file.read_to_string(&mut frag_src).unwrap();
+    try!(frag_src_file.read_to_string(&mut frag_src));
     shaders.store("cube.frag", frag_src);
 
+    let program = try!(shaders.load(&display, "cube.vert", "cube.frag"));
+
+    let mut metrics = Metrics::new();
+    let mut mdisplay = try!(MetricsDisplay::new());
+
+    let winref = try!(display.get_window()
+                      .ok_or(Error::with_detail("window error",
+                                                "failed to get window reference")));
+    let mut input = try!(Input::new(winref));
+
+    let mut camera = Camera::new(config.camera().position(),
+                                 config.camera().target());
+    camera.set_speed(config.camera().speed());
+    camera.set_sensitivity(config.camera().sensitivity());
+
+    let mut delta = Delta::new();
+
     'main: loop {
+        metrics.update();
+        try!(mdisplay.display(&metrics));
+
+        let dtime = delta.update();
+
+        let events = display.poll_events();
+        input.update(events);
+        if input.should_close() {
+            break 'main;
+        }
+        if input.is_pressed(Key::Comma) {
+            camera.forward(dtime);
+        }
+        if input.is_pressed(Key::O) {
+            camera.backward(dtime);
+        }
+        if input.is_pressed(Key::A) {
+            camera.left(dtime);
+        }
+        if input.is_pressed(Key::E) {
+            camera.right(dtime);
+        }
+        if input.is_pressed(Key::Space) {
+            camera.up(dtime);
+        }
+        if input.is_pressed(Key::LControl) {
+            camera.down(dtime);
+        }
+
+        let (dx, dy) = input.cursor().get_delta();
+        println!("{} {}", dx, dy);
+        camera.update_target(dx, dy);
+
         let mut target = display.draw();
         target.clear_color(0.8, 0.8, 1.0, 1.0);
         target.clear_depth(1.0);
@@ -95,32 +185,28 @@ fn main() {
         let (width, height) = target.get_dimensions();
         let aspect = width as f32 / height as f32;
 
-        let model = Mat4::rotation(PI / 4.0, Vec3::new(0.0, 1.0, 0.0));
-        let view = Mat4::translation(Vec3::new(0.0, 0.0, -5.0));
-        let projection = Mat4::perspective(70.0, aspect, 0.1, 100.0);
 
-        let uniforms = uniform! {
-            model: model,
-            view: view,
-            projection: projection,
-            tex: texture.sampled()
-                        .wrap_function(SamplerWrapFunction::Mirror)
-                        .minify_filter(MinifySamplerFilter::LinearMipmapLinear)
-                        .magnify_filter(MagnifySamplerFilter::Linear),
-        };
-        let program = shaders.load(&display, "cube.vert", "cube.frag").unwrap();
-        cube.draw(&mut target, program, &uniforms).unwrap();
-        target.finish().unwrap();
+        let projection = Mat4::perspective(config.projection().fov(),
+                                           aspect,
+                                           config.projection().znear(),
+                                           config.projection().zfar());
 
-        for ev in display.poll_events() {
-            match ev {
-                Event::Closed => break 'main,
-                Event::KeyboardInput( ElementState::Pressed, _, Some(VirtualKeyCode::Q)) => {
-                    break 'main
-                },
-                _ => {},
-            }
+
+
+        for cube in cubes.iter() {
+            let model = cube.model();
+
+            let uniforms = uniform! {
+                model: model,
+                view: camera.to_matrix(),
+                projection: projection,
+                tex: cube.sampler(),
+            };
+
+            try!(cube.draw(&mut target, program, &uniforms));
         }
+        try!(target.finish());
     }
+    Ok(())
 }
 
