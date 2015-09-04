@@ -8,91 +8,51 @@ use gel::{
 };
 use num::Zero;
 
-#[derive(Debug, Clone)]
+use player::Player;
+use config::CameraParams;
+
 pub struct Camera {
-    position: Vec3,
-    target: Vec3,
     up: Vec3,
-    yaw: f32,
-    pitch: f32,
-    speed: f32,
+    radius: f32,
+    elev: f32,
+    azimuth: f32,
     sensitivity: f32,
 }
 
 impl Camera {
     // Target is relative to position
-    pub fn new(pos: Vec3, target: Vec3) -> Camera {
+    pub fn new(params: &CameraParams) -> Camera {
         Camera {
-            position: pos,
-            target: target,
             up: Vec3::new(0.0, 1.0, 0.0),
-            yaw: 0.0,
-            pitch: 0.0,
-            speed: 1.0,
-            sensitivity: 1.0,
+            radius: params.radius(),
+            elev: 0.0,
+            azimuth: 90.0,
+            sensitivity: params.sensitivity(),
         }
     }
 
-    pub fn set_sensitivity(&mut self, s: f32) -> &mut Camera {
+    pub fn set_sensitivity(&mut self, s: f32) {
         self.sensitivity = s;
-        self
     }
 
-    pub fn set_speed(&mut self, s: f32) -> &mut Camera {
-        self.speed = s;
-        self
-    }
-
-    pub fn forward(&mut self, dt: f32) {
-        self.position = self.position + (self.target * (self.speed * dt));
-    }
-
-    pub fn backward(&mut self, dt: f32) {
-        self.position = self.position - (self.target * (self.speed * dt));
-    }
-
-    pub fn left(&mut self, dt: f32) {
-        self.position = self.position - (self.target.cross(&self.up).normalize() * (self.speed * dt));
-    }
-
-    pub fn right(&mut self, dt: f32) {
-        self.position = self.position + (self.target.cross(&self.up).normalize() * (self.speed * dt));
-    }
-
-    pub fn up(&mut self, dt: f32) {
-        self.position = self.position + (self.up * (self.speed * dt));
-    }
-
-    pub fn down(&mut self, dt: f32) {
-        self.position = self.position + (-self.up * (self.speed * dt));
-    }
-
-    pub fn update_target(&mut self, deltax: i32, deltay: i32) {
+    pub fn update(&mut self, deltax: i32, deltay: i32) {
         let (mut deltax, mut deltay) = (deltax as f32, deltay as f32);
 
         deltax *= self.sensitivity;
         deltay *= self.sensitivity;
 
-        self.yaw += deltax;
-        self.pitch += deltay;
-
-        if self.pitch > 89.0 {
-            self.pitch = 89.0;
-        }
-        if self.pitch < -89.0 {
-            self.pitch = -89.0;
-        }
-
-        let mut target = Vec3::zero();
-        target.x = gel::radians(self.yaw).cos() * gel::radians(self.pitch).cos();
-        target.y = gel::radians(self.pitch);
-        target.z = gel::radians(self.yaw).sin() * gel::radians(self.pitch).cos();
-        self.target = target.normalize();
+        self.azimuth += deltax;
+        self.elev += -deltay;
     }
 
-    pub fn to_matrix(&self) -> Mat4 {
-        Mat4::look_at(self.position, self.position + self.target, self.up)
+    pub fn look_at(&self, pos: Vec3) -> Mat4 {
+        let elevation = gel::radians(self.elev);
+        let azimuth = gel::radians(self.azimuth);
+        let mut position = pos;
+        position.x += self.radius * elevation.cos() * azimuth.cos();
+        position.y += self.radius * elevation.sin();
+        position.z += self.radius * elevation.cos() * azimuth.sin();
+        Mat4::look_at(position, pos, self.up)
     }
 }
-
 

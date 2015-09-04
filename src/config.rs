@@ -34,7 +34,8 @@ pub struct Config {
     window: WindowParams,
     projection: ProjectionParams,
     camera: CameraParams,
-    cubes: Vec<CubeParams>,
+    player: PlayerParams,
+    light: LightParams,
 }
 
 impl Config {
@@ -69,8 +70,12 @@ impl Config {
         &self.camera
     }
 
-    pub fn cubes(&self) -> &[CubeParams] {
-        &self.cubes
+    pub fn player(&self) -> &PlayerParams {
+        &self.player
+    }
+
+    pub fn light(&self) -> &LightParams {
+        &self.light
     }
 }
 
@@ -132,74 +137,85 @@ impl WindowParams {
 }
 
 #[derive(Debug, Clone)]
-pub struct CubeParams {
-    texture: PathBuf,
+pub struct PlayerParams {
+    diffuse_map: PathBuf,
+    specular_map: PathBuf,
+    shine: f32,
     scale: f32,
-    translation: Vec3,
-    axis: Vec3,
-    period: f32,
-    amplitude: f32,
-    pshift: f32,
-    vshift: f32,
+    speed: f32,
 }
 
-impl CubeParams {
-    pub fn texture(&self) -> &Path {
-        &self.texture
+impl PlayerParams {
+    pub fn diffuse_map(&self) -> &Path {
+        &self.diffuse_map
+    }
+
+    pub fn specular_map(&self) -> &Path {
+        &self.specular_map
+    }
+
+    pub fn shine(&self) -> f32 {
+        self.shine
     }
 
     pub fn scale(&self) -> f32 {
         self.scale
     }
 
-    pub fn translation(&self) -> Vec3 {
-        self.translation
+    pub fn speed(&self) -> f32 {
+        self.speed
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LightParams {
+    scale: f32,
+    position: Vec3,
+    color: Vec3,
+    ambient: Vec3,
+    diffuse: Vec3,
+    specular: Vec3,
+}
+
+impl LightParams {
+    pub fn color(&self) -> Vec3 {
+        self.color
     }
 
-    pub fn axis(&self) -> Vec3 {
-        self.axis
+    pub fn scale(&self) -> f32 {
+        self.scale
     }
 
-    pub fn period(&self) -> f32 {
-        self.period
+    pub fn position(&self) -> Vec3 {
+        self.position
     }
 
-    pub fn amplitude(&self) -> f32 {
-        self.amplitude
+    pub fn ambient(&self) -> Vec3 {
+        self.ambient
     }
 
-    pub fn pshift(&self) -> f32 {
-        self.pshift
+    pub fn diffuse(&self) -> Vec3 {
+        self.diffuse
     }
 
-    pub fn vshift(&self) -> f32 {
-        self.vshift
+    pub fn specular(&self) -> Vec3 {
+        self.specular
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct CameraParams {
-    position: Vec3,
-    target: Vec3,
-    speed: f32,
     sensitivity: f32,
+    radius: f32,
 }
 
 impl CameraParams {
-    pub fn position(&self) -> Vec3 {
-        self.position
-    }
-
-    pub fn target(&self) -> Vec3 {
-        self.target
-    }
-
-    pub fn speed(&self) -> f32 {
-        self.speed
-    }
-
     pub fn sensitivity(&self) -> f32 {
         self.sensitivity
+    }
+
+    pub fn radius(&self) -> f32 {
+        self.radius
     }
 }
 
@@ -230,7 +246,8 @@ struct TomlConfig {
     window: TomlWindowParams,
     projection: TomlProjectionParams,
     camera: TomlCameraParams,
-    cube: Vec<TomlCubeParams>, // cube not cubes. to match toml file.
+    player: TomlPlayerParams,
+    light: TomlLightParams,
 }
 
 impl Into<Config> for TomlConfig {
@@ -240,7 +257,8 @@ impl Into<Config> for TomlConfig {
             window: self.window.into(),
             projection: self.projection.into(),
             camera: self.camera.into(),
-            cubes: self.cube.into_iter().map(|cp| cp.into()).collect(),
+            player: self.player.into(),
+            light: self.light.into(),
         }
     }
 }
@@ -290,47 +308,60 @@ impl Into<WindowParams> for TomlWindowParams {
 }
 
 #[derive(Debug, Clone, RustcDecodable)]
-struct TomlCubeParams {
-    texture: String,
-    scale: Option<f32>,
-    translation: Option<Vec3>,
-    axis: Option<Vec3>,
-    period: Option<f32>,
-    amplitude: Option<f32>,
-    pshift: Option<f32>,
-    vshift: Option<f32>,
+struct TomlPlayerParams {
+    diffuse_map: String,
+    specular_map: String,
+    shine: f32,
+    scale: f32,
+    speed: f32,
 }
 
-impl Into<CubeParams> for TomlCubeParams {
-    fn into(self) -> CubeParams {
-        CubeParams {
-            texture: self.texture.into(),
-            scale: self.scale.unwrap_or(1.0),
-            translation: self.translation.unwrap_or(Vec3::zero()),
-            axis: self.axis.unwrap_or(Vec3::new(0.0, 1.0, 0.0)),
-            period: self.period.unwrap_or(gel::PI_2),
-            amplitude: self.amplitude.unwrap_or(f32::one()),
-            pshift: self.pshift.unwrap_or(f32::zero()),
-            vshift: self.vshift.unwrap_or(f32::zero()),
+impl Into<PlayerParams> for TomlPlayerParams {
+    fn into(self) -> PlayerParams {
+        PlayerParams {
+            diffuse_map: self.diffuse_map.into(),
+            specular_map: self.specular_map.into(),
+            shine: self.shine,
+            scale: self.scale,
+            speed: self.speed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, RustcDecodable)]
+struct TomlLightParams {
+    scale: f32,
+    position: Vec3,
+    color: Vec3,
+    ambient: Vec3,
+    diffuse: Vec3,
+    specular: Vec3,
+}
+
+impl Into<LightParams> for TomlLightParams {
+    fn into(self) -> LightParams {
+        LightParams {
+            scale: self.scale,
+            position: self.position,
+            color: self.color,
+            ambient: self.ambient,
+            diffuse: self.diffuse,
+            specular: self.specular,
         }
     }
 }
 
 #[derive(Debug, Clone, RustcDecodable)]
 struct TomlCameraParams {
-    position: Vec3,
-    target: Vec3,
-    speed: f32,
     sensitivity: f32,
+    radius: f32,
 }
 
 impl Into<CameraParams> for TomlCameraParams {
     fn into(self) -> CameraParams {
         CameraParams {
-            position: self.position,
-            target: self.target,
-            speed: self.speed,
             sensitivity: self.sensitivity,
+            radius: self.radius,
         }
     }
 }

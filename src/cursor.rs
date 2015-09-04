@@ -1,6 +1,4 @@
-use glutin::{
-    CursorState,
-};
+use glutin::MouseCursor;
 use glium::backend::glutin_backend::WinRef;
 
 use errors::{
@@ -17,6 +15,7 @@ pub struct Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     pub fn new(winref: WinRef, xcenter: i32, ycenter: i32) -> Result<Cursor> {
+        winref.set_cursor(MouseCursor::Crosshair);
         try!(winref.set_cursor_position(xcenter, ycenter));
 
         Ok(Cursor {

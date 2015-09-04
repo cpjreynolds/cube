@@ -1,4 +1,9 @@
 use std::borrow::Borrow;
+use std::cell::{
+    RefCell,
+    Ref,
+};
+use std::ops::Deref;
 use std::collections::hash_map::{
     HashMap,
     Entry,
@@ -41,9 +46,28 @@ impl<K> Manager<K>
         self.sources.insert(key, source)
     }
 
-    pub fn load<F, Q: ?Sized>(&mut self, facade: &F, vert: &Q, frag: &Q) -> Result<&Program>
+    pub fn compile<F, Q: ?Sized>(&mut self, facade: &F, vert: &Q, frag: &Q) -> Result<()>
         where F: Facade,
               K: Borrow<Q>,
+              Q: Hash + Eq
+    {
+        let vsrc = try!(self.sources.get(vert).ok_or(Error::new("missing vertex shader")));
+        let fsrc = try!(self.sources.get(frag).ok_or(Error::new("missing fragment shader")));
+
+        let prog_key = {
+            let mut hasher = SipHasher::new();
+            vert.hash(&mut hasher);
+            frag.hash(&mut hasher);
+            hasher.finish()
+        };
+
+        let program = try!(Program::from_source(facade, vsrc, fsrc, None));
+        self.programs.insert(prog_key, program);
+        Ok(())
+    }
+
+    pub fn load<Q: ?Sized>(&self, vert: &Q, frag: &Q) -> Result<&Program>
+        where K: Borrow<Q>,
               Q: Hash + Eq
     {
         let prog_key = {
@@ -53,20 +77,12 @@ impl<K> Manager<K>
             hasher.finish()
         };
 
-        match self.programs.entry(prog_key) {
-            Entry::Occupied(entry) => {
-                Ok(entry.into_mut())
-            },
-            Entry::Vacant(entry) => {
-                let vsrc = try!(self.sources.get(vert)
-                                .ok_or(Error::new("missing vertex shader")));
-                let fsrc = try!(self.sources.get(frag)
-                                .ok_or(Error::new("missing fragment shader")));
-
-                let program = try!(Program::from_source(facade, vsrc, fsrc, None));
-                Ok(entry.insert(program))
-            },
+        if let Some(program) = self.programs.get(&prog_key) {
+            Ok(program)
+        } else {
+            Err(Error::new("requested program does not exist"))
         }
+
     }
 }
 

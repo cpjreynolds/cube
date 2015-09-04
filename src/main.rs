@@ -50,13 +50,8 @@ use glutin::{
 };
 
 use cube::Cube;
-use wave::WaveBuilder;
 use resource::shader::{
     Manager,
-};
-use metrics::{
-    Metrics,
-    MetricsDisplay,
 };
 use config::Config;
 use process::Process;
@@ -66,22 +61,25 @@ use input::{
     Key,
 };
 use delta::Delta;
+use player::Player;
+use light::Light;
 use errors::{
     Result,
     Error,
 };
 
 mod cube;
-mod wave;
 mod resource;
 mod camera;
 mod config;
-mod metrics;
 mod errors;
 mod process;
 mod delta;
 mod input;
+mod player;
 mod cursor;
+mod light;
+mod file;
 
 fn main() {
     let process = Process::new(execute);
@@ -95,59 +93,61 @@ fn execute() -> Result<()> {
 
     let window_builder = config.window().to_window_builder();
     let display = try!(window_builder.build_glium());
-
-    let mut cubes: Vec<Cube> = Vec::new();
-    for cparams in config.cubes().iter() {
-        let tex_img_path = config.paths().assets().join(cparams.texture());
-        let img = try!(image::open(tex_img_path));
-        let texture = try!(SrgbTexture2d::new(&display, img));
-
-        let mut cube: Cube = try!(Cube::new(&display, texture));
-        cube.set_translation(cparams.translation())
-            .set_axis(cparams.axis())
-            .set_scale(cparams.scale());
-        cube.wave_mut()
-            .set_amplitude(cparams.amplitude())
-            .set_period(cparams.period())
-            .set_pshift(cparams.pshift())
-            .set_vshift(cparams.vshift());
-
-        cubes.push(cube);
+    {
+        // Clear sceen to something while loading.
+        let mut target = display.draw();
+        target.clear_color(0.01, 0.01, 0.01, 1.0);
+        target.clear_depth(1.0);
+        try!(target.finish());
     }
+
+    let player_params = config.player();
+    let diffuse_map_path = config.paths().assets().join(player_params.diffuse_map());
+    let diffuse_map_img = try!(image::open(diffuse_map_path));
+    let diffuse_map = try!(SrgbTexture2d::new(&display, diffuse_map_img));
+    let specular_map_path = config.paths().assets().join(player_params.specular_map());
+    let specular_map_img = try!(image::open(specular_map_path));
+    let specular_map = try!(SrgbTexture2d::new(&display, specular_map_img));
+    let mut player: Player = try!(Player::new(&display,
+                                              diffuse_map,
+                                              specular_map,
+                                              player_params.shine(),
+                                              player_params));
 
     let mut shaders = Manager::new();
 
-    let mut vert_src_file = try!(File::open(config.paths().shaders().join("cube.vert")));
-    let mut vert_src = String::new();
-    try!(vert_src_file.read_to_string(&mut vert_src));
+    let vert_src = try!(file::load(config.paths().shaders().join("cube.vert")));
     shaders.store("cube.vert", vert_src);
 
-    let mut frag_src_file = try!(File::open(config.paths().shaders().join("cube.frag")));
-    let mut frag_src = String::new();
-    try!(frag_src_file.read_to_string(&mut frag_src));
+    let frag_src = try!(file::load(config.paths().shaders().join("cube.frag")));
     shaders.store("cube.frag", frag_src);
 
-    let program = try!(shaders.load(&display, "cube.vert", "cube.frag"));
+    try!(shaders.compile(&display, "cube.vert", "cube.frag"));
 
-    let mut metrics = Metrics::new();
-    let mut mdisplay = try!(MetricsDisplay::new());
+    let light_vert_src = try!(file::load(config.paths().shaders().join("light.vert")));
+    shaders.store("light.vert", light_vert_src);
+
+    let light_frag_src = try!(file::load(config.paths().shaders().join("light.frag")));
+    shaders.store("light.frag", light_frag_src);
+
+    try!(shaders.compile(&display, "light.vert", "light.frag"));
 
     let winref = try!(display.get_window()
                       .ok_or(Error::with_detail("window error",
                                                 "failed to get window reference")));
+
+    let mut light: Light = try!(Light::new(&display, config.light()));
+
     let mut input = try!(Input::new(winref));
 
-    let mut camera = Camera::new(config.camera().position(),
-                                 config.camera().target());
-    camera.set_speed(config.camera().speed());
-    camera.set_sensitivity(config.camera().sensitivity());
+    let mut camera = Camera::new(config.camera());
 
     let mut delta = Delta::new();
 
-    'main: loop {
-        metrics.update();
-        try!(mdisplay.display(&metrics));
+    let player_program = try!(shaders.load("cube.vert", "cube.frag"));
+    let light_program = try!(shaders.load("light.vert", "light.frag"));
 
+    'main: loop {
         let dtime = delta.update();
 
         let events = display.poll_events();
@@ -156,30 +156,29 @@ fn execute() -> Result<()> {
             break 'main;
         }
         if input.is_pressed(Key::Comma) {
-            camera.forward(dtime);
+            player.forward(dtime);
         }
         if input.is_pressed(Key::O) {
-            camera.backward(dtime);
+            player.backward(dtime);
         }
         if input.is_pressed(Key::A) {
-            camera.left(dtime);
+            player.left(dtime);
         }
         if input.is_pressed(Key::E) {
-            camera.right(dtime);
+            player.right(dtime);
         }
         if input.is_pressed(Key::Space) {
-            camera.up(dtime);
+            player.up(dtime);
         }
         if input.is_pressed(Key::LControl) {
-            camera.down(dtime);
+            player.down(dtime);
         }
 
         let (dx, dy) = input.cursor().get_delta();
-        println!("{} {}", dx, dy);
-        camera.update_target(dx, dy);
+        camera.update(dx, dy);
 
         let mut target = display.draw();
-        target.clear_color(0.8, 0.8, 1.0, 1.0);
+        target.clear_color(0.01, 0.01, 0.01, 1.0);
         target.clear_depth(1.0);
 
         let (width, height) = target.get_dimensions();
@@ -191,20 +190,37 @@ fn execute() -> Result<()> {
                                            config.projection().znear(),
                                            config.projection().zfar());
 
+        let view = camera.look_at(player.position());
 
-
-        for cube in cubes.iter() {
-            let model = cube.model();
-
+        {
             let uniforms = uniform! {
-                model: model,
-                view: camera.to_matrix(),
+                model: player.model(),
+                view: view,
                 projection: projection,
-                tex: cube.sampler(),
-            };
 
-            try!(cube.draw(&mut target, program, &uniforms));
+                diffuse_map: player.diffuse_map(),
+                specular_map: player.specular_map(),
+
+                light_pos: light.position(),
+                light_color: light.color(),
+                light_ambient: light.ambient(),
+                light_diffuse: light.diffuse(),
+                light_specular: light.specular(),
+
+                shine: player.shine(),
+            };
+            try!(player.draw(&mut target, player_program, &uniforms));
         }
+
+        {
+            let uniforms = uniform! {
+                model: light.model(),
+                view: view,
+                projection: projection,
+            };
+            try!(light.draw(&mut target, light_program, &uniforms));
+        }
+
         try!(target.finish());
     }
     Ok(())
